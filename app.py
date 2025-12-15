@@ -1,41 +1,41 @@
+from dotenv import load_dotenv
+import os
 from flask import Flask, request, jsonify
 import pdfplumber
 import requests
 import json
+from jsonschema import validate, ValidationError
 
 app = Flask(__name__)
 
-API_KEY = "AIzaSyCbcjSLhGVB1UmF4uqpbwlCwyghUHfGyXk"
-MODEL = "gemini-2.5-flash" 
+load_dotenv()
+
+API_KEY = os.getenv("API_KEY")
+MODEL = os.getenv("MODEL")
 
 @app.post("/extract-requisition")
 def extract_requisition():
-
     file = request.files.get("file")
     if not file:
         return jsonify({"error": "No se envió archivo PDF"}), 400
 
-    # Extraer texto
     texto = ""
     with pdfplumber.open(file) as pdf:
         for page in pdf.pages:
             texto += (page.extract_text() or "") + "\n"
 
-    # Cargar tu schema completo
     with open("schema.json", "r", encoding="utf-8") as f:
-        SCHEMA = f.read()
+        SCHEMA = json.load(f)
 
-    # Construir el prompt especialmente para evaluar el PDF contra el schema
     prompt_text = f"""
-Extrae los campos del siguiente PDF y genera JSON válido conforme a este schema:
+Extrae los datos del PDF a JSON conforme al siguiente schema:
 
-{SCHEMA}
+{json.dumps(SCHEMA, indent=2)}
 
-Texto extraído:
+Texto:
 {texto}
 """
 
-    # Construir la petición REST correctamente según docs de Generative Language
     body = {
         "contents": [
             {
@@ -47,9 +47,7 @@ Texto extraído:
     }
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={API_KEY}"
-    headers = {"Content-Type": "application/json"}
-
-    response = requests.post(url, headers=headers, json=body)
+    response = requests.post(url, json=body)
 
     if response.status_code != 200:
         return jsonify({
@@ -57,19 +55,37 @@ Texto extraído:
             "detalle": response.text
         }), response.status_code
 
-    # Obtener texto de respuesta
+    # Extraer texto de respuesta
+    out = response.json()
+    raw_text = out["candidates"][0]["content"]["parts"][0]["text"]
+
+    # Limpiar marcadores de código si hay
+    import re
+    cleaned = re.sub(r"```(?:json)?\s*({.*?})\s*```", r"\1", raw_text, flags=re.DOTALL)
+
+    # Intentar parsear a JSON
     try:
-        out = response.json()
-        # Extraer texto principal de la respuesta
-        candidato = out.get("candidates", [])[0]
-        texto_salida = candidato.get("content", {}).get("parts", [{}])[0].get("text", "")
-        data = json.loads(texto_salida)
-    except Exception as e:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as e:
         return jsonify({
             "error": "No se pudo parsear JSON de Gemini",
-            "raw": response.text
+            "raw_output": raw_text,
+            "exception": str(e)
         }), 500
 
+    # �️ VALIDAR contra tu schema
+    try:
+        validate(instance=data, schema=SCHEMA)
+    except ValidationError as err:
+        return jsonify({
+            "error": "El JSON no cumple con el schema",
+            "validation_error": err.message,
+            "path": list(err.path),
+            "schema_path": list(err.schema_path),
+            "data": data
+        }), 400
+
+    # Si pasa validación, devolver resultado
     return jsonify(data)
 
 

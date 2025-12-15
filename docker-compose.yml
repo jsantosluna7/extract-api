@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  api:
+    build: .
+    container_name: extract_api
+    env_file:
+      - .env
+    restart: always
+
+  nginx:
+    image: nginx:alpine
+    container_name: extract_nginx
+    ports:
+      - "6010:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/nginx.conf:ro
+    depends_on:
+      - api
+    restart: always
