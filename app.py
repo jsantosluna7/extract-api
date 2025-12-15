@@ -1,74 +1,77 @@
 from flask import Flask, request, jsonify
 import pdfplumber
-import google.generativeai as genai
+import requests
 import json
 
-print("Inicializando servidor...")
-
-# Configura tu API key
-genai.configure(api_key="AIzaSyCbcjSLhGVB1UmF4uqpbwlCwyghUHfGyXk")
-print("Gemini configurado.")
-
 app = Flask(__name__)
-print("Flask inicializado.")
 
-# Cargar schema desde archivo
-with open("schema.json", "r", encoding="utf-8") as f:
-    SCHEMA = f.read()
-
-print("Schema cargado.")
-
+API_KEY = "AIzaSyCbcjSLhGVB1UmF4uqpbwlCwyghUHfGyXk"
+MODEL = "gemini-2.5-flash" 
 
 @app.post("/extract-requisition")
 def extract_requisition():
+
     file = request.files.get("file")
     if not file:
         return jsonify({"error": "No se envió archivo PDF"}), 400
 
-    # Extrae texto del PDF
+    # Extraer texto
     texto = ""
     with pdfplumber.open(file) as pdf:
         for page in pdf.pages:
             texto += (page.extract_text() or "") + "\n"
 
-    # Prompt para Gemini
-    system_prompt = f"""
-Eres un extractor experto de datos. Recibirás texto extraído de un PDF de requisición 
-y debes convertirlo EXACTAMENTE al siguiente JSON Schema.
+    # Cargar tu schema completo
+    with open("schema.json", "r", encoding="utf-8") as f:
+        SCHEMA = f.read()
 
-Debes devolver SOLO JSON válido, sin explicaciones y sin texto adicional.
-
-Si algún dato no aparece en el PDF:
-- Strings: ""
-- Números: 0
-- Arrays: []
-- Nullables: null
-
-El resultado DEBE cumplir estrictamente el siguiente schema:
+    # Construir el prompt especialmente para evaluar el PDF contra el schema
+    prompt_text = f"""
+Extrae los campos del siguiente PDF y genera JSON válido conforme a este schema:
 
 {SCHEMA}
+
+Texto extraído:
+{texto}
 """
 
-    model = genai.GenerativeModel("gemini-1.5-pro")
+    # Construir la petición REST correctamente según docs de Generative Language
+    body = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt_text}
+                ]
+            }
+        ]
+    }
 
-    # Llamada a Gemini
-    response = model.generate_content(
-        system_prompt + "\n\n" + texto,
-        generation_config={
-            "response_mime_type": "application/json"   # ← fuerza JSON
-        }
-    )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent?key={API_KEY}"
+    headers = {"Content-Type": "application/json"}
 
-    # Intentar parsear como JSON
+    response = requests.post(url, headers=headers, json=body)
+
+    if response.status_code != 200:
+        return jsonify({
+            "error": "Gemini API error",
+            "detalle": response.text
+        }), response.status_code
+
+    # Obtener texto de respuesta
     try:
-        data = json.loads(response.text)
+        out = response.json()
+        # Extraer texto principal de la respuesta
+        candidato = out.get("candidates", [])[0]
+        texto_salida = candidato.get("content", {}).get("parts", [{}])[0].get("text", "")
+        data = json.loads(texto_salida)
     except Exception as e:
-        return jsonify({"error": "Gemini devolvió JSON inválido", "raw": response.text}), 500
+        return jsonify({
+            "error": "No se pudo parsear JSON de Gemini",
+            "raw": response.text
+        }), 500
 
     return jsonify(data)
 
 
-# ------------ **AQUÍ ESTABA EL PROBLEMA** ------------
 if __name__ == "__main__":
-    print("Servidor ejecutándose en http://127.0.0.1:5000")
-    app.run(debug=True, port=5000)
+    app.run(debug=True)
