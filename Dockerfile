@@ -1,12 +1,10 @@
 FROM python:3.11-slim
 
-# Evitar archivos .pyc
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Dependencias del sistema necesarias para pdfplumber
 RUN apt-get update && apt-get install -y \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
