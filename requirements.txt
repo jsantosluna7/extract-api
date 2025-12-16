@@ -3,4 +3,5 @@ python-dotenv
 pdfplumber
 requests
 jsonschema
+openai
 gunicorn
