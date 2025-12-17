@@ -12,7 +12,7 @@ load_dotenv()
 
 # --- KEYS ---
 API_KEY_GOOGLE = os.getenv("API_KEY_GOOGLE")
-MODEL_GOOGLE = os.getenv("MODEL_GOOGLE")  # ej: gemini-2.5-pro
+MODEL_GOOGLE = os.getenv("MODEL_GOOGLE")
 
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
