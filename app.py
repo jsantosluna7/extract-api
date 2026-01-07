@@ -100,8 +100,21 @@ Texto:
             "schema_path": list(err.schema_path),
             "data": data
         }), 400
+    
+    # Agregar campo items_count
+    lines = data.get("lines", [])
+    try:
+        items_count = len(lines)
+    except Exception:
+        items_count = 0
+    
+    # Devolver con items_count = 0
+    result = {
+        **data,
+        "items_count": items_count
+    }
 
-    return jsonify(data)
+    return jsonify(result)
 
 
 if __name__ == "__main__":
